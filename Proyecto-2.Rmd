@@ -1,0 +1,687 @@
+---
+title: "Proyecto 2. Supervivencia. Estadística 3."
+author: "Adame Serrano Eduardo" 
+output: 
+  html_document:
+    theme: darkly
+    toc: FALSE
+    toc_depth: 3
+    toc_float:
+      collapsed: TRUE
+      smooth_scroll : TRUE
+      number_sections : TRUE
+    df_print: paged
+---
+
+
+```{r Paqueterias, include=FALSE}
+ 
+library(survival)
+library(KMsurv)
+library(survMisc)
+library(survminer)
+library(ggfortify)
+library(flexsurv)
+library(actuar)
+library(dplyr)
+library(KMsurv)
+```
+
+# {.tabset .tabset-fade .tabset-pills}
+
+## Introducción. {.tabset .tabset-fade .tabset-pills}
+
+
+Los siguientes datos contienen la información recopilada del ensayo de la Mayo Clinic sobre cirrosis biliar primaria (CBP) del hígado realizado entre 1974 y 1984.
+
+```{r Lectura base, echo=FALSE}
+datos = read.csv("cirrhosis.csv")
+head(datos)
+```
+
+Un total de 424 pacientes con CBP, remitidos a Mayo Clinic durante ese intervalo de diez años, cumplieron con los criterios de elegibilidad para el ensayo aleatorizado controlado con placebo del fármaco D-penicilamina. Los primeros 312 casos del conjunto de datos participaron en el ensayo aleatorizado y contienen datos en gran parte completos. Los 112 casos adicionales no participaron en el ensayo clínico, pero consintieron en que se registraran las mediciones básicas y se les hiciera seguimiento para la supervivencia. Seis de esos casos se perdieron durante el seguimiento poco después del diagnóstico, por lo que los datos aquí corresponden a 106 casos adicionales, así como a los 312 participantes asignados al azar dando un total de 418 participantes.
+
+## Análisis descriptivo {.tabset .tabset-fade .tabset-pills}
+
+### Características generales y particulares
+
+```{r Estados plot, echo=FALSE, warning=FALSE}
+plot_estados = ggplot(data=datos, aes(x=Stage,fill = Status) )
+        
+plot_estados +    geom_histogram(binwidth = .5) +labs(x = "Etapa histológica de la enfermedad", y="Número de pacientes", fill= "Estado")
+```
+
+Donde C representa el estado censurado, CL a su vez representa un paciente censurado por transplante hepático y finalmente D para la muerte del paciente.
+
+
+```{r Conversion de los años, include=FALSE}
+anios_paciente = datos$Age/365 
+anios_paciente = round(anios_paciente,digits = 0)
+anios_paciente
+```
+
+Debido a que en la base de datos original, los años de los pacientes se presentan en días, entonces para una mejor interpretación se convierte la variable de edad en días a una variable de edad en años (evidentemente redondeamos dicha variable).
+
+
+```{r Edades, echo=FALSE}
+edades = ggplot(datos,aes(x=anios_paciente, fill = anios_paciente))
+
+edades + geom_histogram(binwidth = .7)  + labs(x ="Edad del paciente", y= "Número de pacientes")
+```
+
+De lo anterior notamos que tenemos una mayor concentración de pacientes en edades entre los 40 y 60 años, presentando la mayor concentración de todas, en los pacientes de edad 55 aproximadamente.
+
+
+
+Posterior a ello, analizaremos la cantidad de hombres y mujeres en dicho estudio 
+```{r Sexo, echo=FALSE}
+sexo = ggplot(datos , aes(Sex,y = (..count..)/sum(..count..), fill = Sex))
+
+sexo + geom_bar(width =0.4)+ labs(x = "Sexo" , fill = "Sexo") +
+  scale_y_continuous("Porcentaje",labels=scales::percent)
+```
+
+Se observa claramente que predomina el sexo femenino, teniendo alrededor del 89% de la población en cuestión.
+
+
+Posteriormente creamos un objeto de supervivencia que vaya en relación al tiempo y fallas (censuras) 
+
+```{r estados df, include=FALSE}
+estado = c(datos$Status)
+estados_df = split(datos, f=factor(datos$Status))
+estados_df
+```
+
+
+
+
+```{r ID´s, include=FALSE}
+id_D = c(estados_df$D[1])
+id_D
+id_C = c(estados_df$C[1])
+id_C
+id_CL = c(estados_df$CL[1])
+id_CL
+
+```
+
+```{r Censuras tipo C, echo=FALSE}
+delta = c()
+for(i in 1:length(estado)){
+  if(estado[i] == "D"){
+    delta[i] = 1
+  }else if(estado[i]=="C"){
+    delta[i] = 0
+  }else if(estado[i] == "CL"){
+    delta[i] = 0
+  }
+  delta
+}
+```
+ 
+
+
+
+Para el análisis de supervivencia hemos agrupado en la base los dos tipos de censura, para únicamente tener un tipo, por los tipos de censura que teníamos, particularmente "C" y "CL".
+
+Representamos gráficamente el número de pacientes que fueron observados como falla o censura de acuerdo al sexo.
+
+
+
+```{r Plot falla y censura por sexos, echo=FALSE}
+ggplot(data=datos,aes(x=delta, fill = Sex)) +geom_histogram(binwidth = .5) +labs(x = "Falla o censura", y="Número de pacientes", fill= "Sexo")
+
+```
+
+### Estimador Kaplan-Meier de la población
+
+```{r Base con delta, include=FALSE}
+base_nueva = cbind(datos, delta)
+base_nueva
+```
+
+
+Creamos nuestro objeto de supervivencia, de acuerdo al número de días. 
+
+```{r Objeto de supervivencia, echo=FALSE}
+objeto= Surv(time = base_nueva$N_Days,event = base_nueva$delta) #observamos fallas y censuras por cada tiempo
+ajuste <- survfit(Surv(time = base_nueva$N_Days,event = base_nueva$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = base_nueva)
+### conf.type="none","plain","log","log-log"
+ajuste
+```
+
+
+Plot
+
+```{r KM ajuste, echo=FALSE}
+plot(ajuste, main = "Estimador Kaplan-Meier", xlab =  "t",
+     col = "red", ylab = "S(t)", lwd = 3,
+     conf.int = TRUE, las=2,xlim = c(0,5500))
+```
+
+
+### Variables que afectan el tiempo de supervivencia
+
+Seleccionamos las variables a trabajar que son significativas.
+
+Sexo
+```{r Variables sexo, include=FALSE}
+#Variable sexo
+mujeres = subset(x=base_nueva,base_nueva$Sex == "F")
+head(mujeres)
+hombres = subset(x=base_nueva,base_nueva$Sex == "M") 
+head(hombres)
+```
+
+
+
+```{r ajuste y plot sexo, include=FALSE}
+ajuste_sexo_h <- survfit(Surv(time = hombres$N_Days,event = hombres$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = hombres)
+### conf.type="none","plain","log","log-log"
+plot(ajuste_sexo_h)
+```
+
+
+```{r ajuste mujeres, include=FALSE}
+ajuste_sexo_m <- survfit(Surv(time = mujeres$N_Days,event = mujeres$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = mujeres) 
+### conf.type="none","plain","log","log-log"
+plot(ajuste_sexo_m) 
+```
+
+```{r ajuste hombres, echo=FALSE}
+plot(ajuste_sexo_h, col= "blue", main= "Estimador KM por sexo", lty = 1, lwd=3, xlim=c(0,4000),conf.int =F ) 
+par(new=T)
+plot(ajuste_sexo_m, col ="salmon",main= "", lty = 1, lwd=3, xlim=c(0,4000),conf.int =F)
+
+legend(x = "bottomleft", c("hombres","mujeres"), lty = 1,
+       col = c("blue", "salmon"), bty = "n") 
+legend(x = "bottomleft", c("hombres","mujeres"), lty = 1,
+       col = c("blue", "salmon"), bty = "n")
+```
+
+Estado de la enfermedad
+
+```{r Estados subset, include=FALSE}
+#Variable sexo
+estado_1 = subset(x=base_nueva,base_nueva$Stage == "1")
+estado_2= subset(x=base_nueva,base_nueva$Stage == "2")
+estado_3 = subset(x=base_nueva,base_nueva$Stage== "3")
+estado_4 = subset(x=base_nueva,base_nueva$Stage == "4")
+```
+
+
+```{r ajuste estado1, include=FALSE}
+ajuste_estado_1 <- survfit(Surv(time = estado_1$N_Days,event = estado_1$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = estado_1)
+### conf.type="none","plain","log","log-log"
+plot(ajuste_estado_1)
+```
+
+
+```{r ajuste estado 2, include=FALSE}
+ajuste_estado_2 <- survfit(Surv(time = estado_2$N_Days,event = estado_2$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = estado_2)
+### conf.type="none","plain","log","log-log"
+plot(ajuste_estado_2) 
+```
+
+
+```{r Ajuste estado3, include=FALSE}
+ajuste_estado_3 <- survfit(Surv(time = estado_3$N_Days,event = estado_3$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = estado_3)
+### conf.type="none","plain","log","log-log"
+```
+
+
+```{r Ajuste estado4, include=FALSE}
+ajuste_estado_4 <- survfit(Surv(time = estado_4$N_Days,event = estado_4$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = estado_4)
+### conf.type="none","plain","log","log-log"
+```
+
+
+```{r Plot ajustes estados, echo=FALSE}
+plot(ajuste_estado_1, col= "red", main= "Estimador KM por estado", lty = 1, lwd=3, xlim=c(0,5000),conf.int =F ) 
+par(new=T)
+plot(ajuste_estado_2, col ="purple",main= "", lty = 1, lwd=3, xlim=c(0,5000),conf.int =F) 
+par(new=T)
+plot(ajuste_estado_3, col ="green",main= "", lty = 1, lwd=3, xlim=c(0,5000),conf.int =F) 
+par(new=T)
+plot(ajuste_estado_4, col ="blue", main= "", lty = 1, lwd=3, xlim=c(0,5000),conf.int =F) 
+legend(x = "bottomleft", c("estado 1","estado 2","estado 3","estado 4"), lty = 1,
+       col = c("red", "purple","green","blue"), bty = "n") 
+legend(x = "bottomleft", c("estado 1","estado 2","estado 3","estado 4"), lty = 1,
+       col = c("red", "purple","green","blue"), bty = "n")
+estado_1 = subset(x=base_nueva,base_nueva$Stage == "1")
+estado_2= subset(x=base_nueva,base_nueva$Stage == "2")
+estado_3 = subset(x=base_nueva,base_nueva$Stage== "3")
+estado_4 = subset(x=base_nueva,base_nueva$Stage == "4")
+```
+
+Hepatomegalia (Agrandamiento del hígado más de lo normal)
+
+```{r hepatomegalia subsets, include=FALSE}
+#Variable sexo
+hep_si = subset(x=base_nueva,base_nueva$Hepatomegaly == "Y")
+hep_no = subset(x=base_nueva,base_nueva$Hepatomegaly == "N") 
+```
+
+
+```{r Con hepatomegalia, include=FALSE}
+ajuste_hep_si <- survfit(Surv(time = hep_si$N_Days,event = hep_si$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = hep_si)
+### conf.type="none","plain","log","log-log"
+plot(ajuste_hep_si)
+```
+
+
+```{r Sin hepatomegalia, include=FALSE}
+ajuste_hep_no <- survfit(Surv(time = hep_no$N_Days,event = hep_no$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = hep_no) 
+### conf.type="none","plain","log","log-log"
+plot(ajuste_hep_no) 
+```
+
+```{r Plot hepatomegalia, echo=FALSE}
+plot(ajuste_hep_si, col= "blue", main= "Estimador KM por Hepatomegalia", lty = 1, lwd=3, xlim=c(0,4000),conf.int =F ) 
+par(new=T)
+plot(ajuste_hep_no, col ="salmon",main= "", lty = 1, lwd=3, xlim=c(0,4000),conf.int =F)
+
+legend(x = "bottomleft", c("Con hepatomegalia","Sin hepatomegalia"), lty = 1,
+       col = c("blue", "salmon"), bty = "n") 
+legend(x = "bottomleft", c("Con hepatomegalia","Sin hepatomegalia"), lty = 1,
+       col = c("blue", "salmon"), bty = "n")
+```
+
+
+Edema
+
+```{r Edema subsets, include=FALSE}
+#Variable sexo
+ed_n = subset(x=base_nueva,base_nueva$Edema == "N")
+ed_s = subset(x=base_nueva,base_nueva$Edema == "S") 
+ed_y = subset(x=base_nueva,base_nueva$Edema == "Y")
+```
+
+Superviviencia N (sin edema y sin tratamiento con diuréticos para el edema)
+
+```{r Edema N , include=FALSE}
+ajuste_ed_n <- survfit(Surv(time = ed_n$N_Days,event = ed_n$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = ed_n)
+### conf.type="none","plain","log","log-log"
+plot(ajuste_ed_n)
+```
+
+Superviviencia S (edema presente sin diuréticos o edema resuelto con diuréticos)
+
+```{r Edema S, include=FALSE}
+ajuste_ed_s <- survfit(Surv(time = ed_s$N_Days,event = ed_s$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = ed_s) 
+### conf.type="none","plain","log","log-log"
+plot(ajuste_ed_s) 
+```
+
+Supervivencia Y (edema a pesar del tratamiento con diuréticos) 
+
+```{r Edema Y, include=FALSE}
+ajuste_ed_y <- survfit(Surv(time = ed_y$N_Days,event = ed_y$delta)~1, type = "kaplan-meier", conf.type="plain", conf.int=0.95, data = ed_y) 
+### conf.type="none","plain","log","log-log"
+```
+
+```{r Plot edemas, echo=FALSE}
+plot(ajuste_ed_n, col= "blue", main= "Estimador KM por Edema", lty = 1, lwd=3, xlim=c(0,4000),conf.int =F ) 
+par(new=T)
+plot(ajuste_ed_s, col ="salmon",main= "", lty = 1, lwd=3, xlim=c(0,4000),conf.int =F)
+par(new=T)
+plot(ajuste_ed_y, col ="orange",main= "", lty = 1, lwd=3, xlim=c(0,4000),conf.int =F)
+
+legend(x = "bottomleft", c("N","S" , "Y"), lty = 1,
+       col = c("blue", "salmon", "orange"), bty = "n") 
+legend(x = "bottomleft", c("N","S", "Y"), lty = 1,
+       col = c("blue", "salmon", "orange"), bty = "n")
+```
+
+Ahora se debe elegir una variable que particione a nuestra población para contrastar la supervivencia, en este caso será por estado de la enfermedad, es decir, que tan avanzada estaba la cirrosis. 
+
+
+
+Realizamos el contraste de hipótesis para una prueba log rank de Mantel-Haenszel.
+
+Entonces, nos interesa contrastar:
+
+$$H_0: So(t) = S1(t) \quad  \text{para todo} \quad t > 0  \quad  vs \quad
+ H_1: So(t) \neq S1(t) \quad  \text{para algun} \quad t > 0;$$
+ 
+donde So corresponde a la funcion de supervivencia de la poblacion.
+
+
+Mencionado lo anterior, realizamos la primer prueba con el siguiente contraste de hipótesis.
+
+$Ho:$ La supervivencia es la misma para tipo 1 y 2 de enfermedad  $vs$  $Ha$: Son diferentes.
+
+```{r Hip est1est2, echo=FALSE, message=FALSE}
+
+est1_est2= subset(x = base_nueva, base_nueva$Stage == 1 | base_nueva$Stage== 2 ) #estado 1 y 2 de la enfermedad
+survdiff(Surv(N_Days, delta) ~ est1_est2$Stage, rho = 0, data =est1_est2 )
+
+```
+
+No hay evidencia para rechazar $Ho$, pues tenemos un p-valor mayor al 5% de significancia, entonces la supervivencia para hombres y mujeres con estado de enfermedad tipo 1 y 2, es la misma. 
+
+
+Hacemos la prueba análoga para los otros dos tipos de estadio
+
+$Ho:$ La supervivencia es la misma para tipo 3 y 4 de enfermedad  $vs$  $Ha$: Son diferentes.
+
+```{r Hip est3est4, echo=FALSE}
+
+est3_est4= subset(x = base_nueva, base_nueva$Stage == 3 | base_nueva$Stage== 4 ) #estado 1 y 2 de la enfermedad
+survdiff(Surv(N_Days, delta) ~ est3_est4$Stage, rho = 0, data =est3_est4 )
+
+```
+
+Hay evidencia para rechazar $Ho$, entonces la supervivencia de tipo 3 y 4 no son iguales. 
+
+Concluimos que la población por estado de la enfermedad no tienen la misma función de supervivencia.
+
+Veamos qué pasa para la supervivencia por hepatomegalia, es decir, si la presentó el paciente o no. 
+
+```{r Hip HepYHepN, echo=FALSE}
+base_hept= subset(x = base_nueva, base_nueva$Hepatomegaly == "Y" | base_nueva$Hepatomegaly == "N" ) 
+survdiff(Surv(N_Days, delta) ~ base_hept$Hepatomegaly, rho = 0, data =base_hept )
+```
+
+Hay evidencia para rechazar $Ho$, entonces la supervivencia por hepatomegalia es diferente si el paciente la presenta o no.
+
+
+## Modelo de riesgos proporcionales de Cox {.tabset .tabset-fade .tabset-pills}
+
+
+### Ajuste del modelo
+
+Ajustamos el modelo, con las variables ya estudiadas anteriormente
+
+```{r Modelos variables, include=FALSE}
+modelo_cox = coxph(Surv(N_Days, delta) ~ Sex + factor(Stage) + Hepatomegaly + factor(Edema) , base_nueva)
+```
+
+
+
+Teniendo el siguiente modelo de riesgos proporcionales de cox
+
+```{r modelo cox, include=FALSE}
+modelo_cox
+```
+
+
+```{r sumary modelo cox, echo=FALSE}
+summary(modelo_cox) 
+```
+
+
+La interpretación se da en el siguiente apartado.
+
+### Estimación puntual e interpretación para los coeficientes de la regresión
+
+De lo anterior notemos que las variables significativas son, evidentemente el sexo, así como los estadíos 3 y 4 de la enfermdad, asi mismo factores como la presencia de hepatomegalia en los pacientes y de edemas tipo S y Y, particularmente los pacientes con edemas de tipo S son aquellos que se trataron sin diuréticos o que se resolvió con diuréticos, y por otro lado, los pacientes con edemas de tipo Y son aquellos que a pesar que se les dió tratamiento no se quitó el edema.
+
+
+Realizando la estimación puntual de los coeficientes de regresión, se da la intepretación a partir de los $\exp(coef)$, los cuales se asocian a la adversión o no al riesgo de muerte particularmente.
+
+Para la variable sexo, tenemos que los pacientes del género masculino presentan un riesgo de 1.6449 mayor en comparación con los pacientes del género femenino, además, dicho coeficiente de la covariable asociada al sexo, específicamente $\beta=0.4977$ presenta un nivel de significancia del 5% en el estudio, esto lo sabemos gracias a su p-value obtenido, el cual fue de 0.0368.
+
+Por otro lado, para los estadios de la enfermedad en la que se encuentre el paciente, tenemos que el hecho de estar en el estado 3 representa un riesgo de muerte de 6.406 mayor en comparación a presentarse en el estadio 1 y 2, y drásticamente notamos como el riesgo aumenta al pasar al estadio 4, teniendo un riesgo de casi el doble al pasar del estadio 3, particularmente su valor es 11.580, es decir, el paciente tiene un riesgo muy elevado de muerte al estar en este estadio en comparación con los 3 primeros.
+
+
+Así mismo, los coeficientes relacionados a las covariables asociadas a los estadios 3 y 4 representan un nivel de significancia del 10% y 5% respectivamente, siendo más representativo el estadio 3 a pesar de lo ya mencionado anteriormente para los pacientes en el estado 4. 
+
+
+Pasando a la variable que representa hepatomegalia (agrandamiento el hígado), notamos que el riesgo de fallecer en caso de presentar este padecimiento es de 1.683 veces más en comparación a no tenerlo. Además, el nivel de significancia del coeficiente obtenido representa un 5% en el estudio.
+
+
+Finalmente para covariables asociadas a los tipos de edema S y Y (ya se aclaró previamente las características clínicas de cada uno), se obtuvo que los pacientes con edema catalogado como tipo S, presentan un riesgo de morir de 1.911 veces mayor en comparación a un paciente con edema del tipo N, por otro lado, para los pacientes con edema del tipo Y, notamos que drásticamente aumenta el riesgo en relación a los dos edemas anteriores, pues se tiene que un paciente con edema tipo Y es 6.640 veces más propenso a morir en comparación a un paciente catalogado con edema tipo S o tipo N.
+
+Además dichos coeficientes asociados a las covariables del edema tipo S y tipo Y representan un 5% y 0.1% respectivamente en el estudio.
+
+Veamos si los riesgos son proporcionales: 
+
+
+
+### Variables explicativas
+
+Como ya vimos en el punto anterior, de acuerdo a las variables empleadas en el modelo, obtuvimos distintos niveles de significancia los cuales catalogamos de la siguiente manera
+
+
++ Nivel del 10% 
+
+  * Estadio 3
+  
+  Para la variable de estadio particularmente en el estado 3 de la enfermedad, se considera que es significativa porque depende de si mejora o no el paciente y en caso de empeorar, ya se vio que el riesgo de muerte incrementa de manera alarmante.
+
++ Nivel del 5% 
+
+  * Sexo M 
+  
+  Se observa que los hombres son mas propensos a morir por la enfermedad
+
+  * Estadio 4
+  
+  En este estadio la probabilidad de muerte se incrementó de manera muy drástica en comparación a los otros estadios
+
+  * Hepatomegalia Y
+  
+  Era de esperar que una persona con el hígado mas grande sea más propenso a morir de cirrosis
+
+
+  * Edema S
+
+  Este tipo de edema es aquel en el cual el paciente presenta edemas sin el uso de diuréticos o puede resolverse por el uso de los diuréticos, es decir, es significante porque en caso de no resolverse, entonces el paciente podría pasar a un estado en el que el edema sea de tipo Y, es decir, el más crítico.
+  
++ Nivel del 0.01%
+  
+  * Edema Y 
+  
+  Básicamente el tipo de edema en el cual los pacientes son más propensos a morir
+
+### Intervalos de confianza para los coeficientes de regresión
+
+Se representan los intervalos por medio de la siguiente tabla 
+
+
+**Intervalos de confianza**
+
+|**Variable** | **lower 0.95** | **uper 0.95**|
+|-------------|----------------|--------------|
+|*SexM*|1.0311|2.624|
+|*Stage3*|0.8639|47.507|
+|*Stage4*|1.5351|87.348|
+|*EdemaS*|1.1278|3.237|
+|*EdemaY*|3.9019|11.299|
+|*HepatomegalyY*|1.0819|2.620|
+
+
+### Proporción del riesgo de falla
+
+Utilizamos la funcion cox.zph para hacer el test al modelo 
+
+$$H_0: \text{Los riesgos son proporcionales} \quad vs \quad  
+\quad H_a\text{:Los riesgos no son proporcionales}$$
+
+
+```{r}
+sup = cox.zph(modelo_cox)
+sup
+```
+
+Como el p-value global es muy pequeño, rechazamos $Ho$ entonces los riesgos no son proporcionales. Aunque para Sexo y Hepatomegalia sí pasa la prueba.
+
+Veamos qué es lo que pasa graficamente: 
+
+```{r}
+ggcoxzph(sup)
+```
+
+Podemos ver que las Betas que tienen un mejor comportamiento es para Sexo y Hepatomegalia. Particularmente para los casos de las variables de Estado y de Edema, notamos que hay valores de p-valor atípicos.
+
+
+Por lo tanto generamos un modelo de cox extendido con la transformación de raiz cuadrada del tiempo 
+
+```{r warning=FALSE}
+modelo_cox_ext = coxph(Surv(N_Days, delta) ~ Sex + factor(Stage)*sqrt(N_Days) + Hepatomegaly + factor(Edema)*sqrt(N_Days) , base_nueva)
+```
+
+Verificando ahora si es un modelo de riesgos proporcionales, verificamos con el test
+
+
+```{r}
+sup_ext = cox.zph(modelo_cox_ext)
+sup_ext
+```
+
+Y de manera análoga los respectivos plots
+
+```{r}
+ggcoxzph(sup_ext)
+
+```
+
+Es decir, ahora nuestro nuevo modelo si cumple ser de riesgos proporcionales al tiempo.
+
+### ¿Existe mayor riesgo en distintos sujetos?
+
+
+Para contestar esta pregunta analizaremos distintos tipos de modelos
+
+Comenzamos por analizar un modelo que tengo únicamente el sexo y el estadio de la enfermedad
+
+```{r Modelo sexo y estado, include=FALSE}
+modelo_sexovsestadio = coxph(Surv(N_Days, delta) ~ Sex + factor(Stage), base_nueva)
+```
+
+
+```{r Plot modelo sexo y estado, echo=FALSE}
+infoM3 = data.frame(Sex="M", Stage=3)
+infoM4 = data.frame(Sex="M", Stage=4)
+infoF3 = data.frame(Sex="F", Stage=3)
+infoF4 = data.frame(Sex="F", Stage=4)
+
+fitM3 = survfit(modelo_sexovsestadio, newdata = infoM3)
+fitM4 = survfit(modelo_sexovsestadio, newdata = infoM4)
+fitF3 = survfit(modelo_sexovsestadio, newdata = infoF3)
+fitF4 = survfit(modelo_sexovsestadio, newdata = infoF4)
+
+
+plot(fitM3, conf.int = FALSE, col = "cornflowerblue", lwd = 3, lty =3,
+     main = "Comparacion de supervivencias por sexo y estadios 3 y 4")
+par(new = TRUE)
+plot(fitM4, conf.int = FALSE, col = "purple", lwd = 3, lty = 1)
+par(new = TRUE)
+plot(fitF3, conf.int = FALSE, col = "green" ,lwd = 3, lty = 3)
+par(new = TRUE)
+plot(fitF4, conf.int = FALSE, col = "red", lwd = 3, lty = 1)
+legend(x = "bottomleft", legend = c("Sexo M Estado 3", "Sexo M Estado 4", "Sexo F Estado 3" , "Sexo F Estado 4"), lty = c(3,1,3,1), 
+       col = c("cornflowerblue","purple", "green","red"), lwd=3)
+```
+
+
+A partir de este modelo, nos quedaremos con la curva de los pacientes cuyo estadio sea 4 y de ambos géneros, sólo que agregaremos el supuesto de hepatomegalia (confirmada) y además el tipo de edema S o Y. 
+
+
+```{r Sexo E4 H ES, echo=FALSE}
+infoM4HES = data.frame(Sex="M", Stage=4, Hepatomegaly ="Y", Edema = "S")
+infoM4HEY = data.frame(Sex="M", Stage=4, Hepatomegaly ="Y", Edema = "Y")
+infoF4HES = data.frame(Sex="F", Stage=4, Hepatomegaly ="Y", Edema = "S")
+infoF4HEY= data.frame(Sex="F", Stage=4, Hepatomegaly ="Y", Edema = "Y")
+
+
+fitM4HES = survfit(modelo_cox, newdata = infoM4HES)
+fitM4HEY = survfit(modelo_cox, newdata = infoM4HEY)
+fitF4HES = survfit(modelo_cox, newdata = infoF4HES)
+fitF4HEY = survfit(modelo_cox, newdata = infoF4HEY)
+
+plot(fitM4HES, conf.int = FALSE, col = "cornflowerblue", lwd = 3, lty =3,
+     main = "Comparacion de supervivencias por sexo,est4, hep y edema(S o Y)")
+par(new = TRUE)
+plot(fitM4HEY, conf.int = FALSE, col = "purple", lwd = 3, lty = 1)
+par(new = TRUE)
+plot(fitF4HES, conf.int = FALSE, col = "green" ,lwd = 3, lty = 3)
+par(new = TRUE)
+plot(fitF4HEY, conf.int = FALSE, col = "red", lwd = 3, lty = 1)
+legend(x = "topright", legend = c("SexoM.E4.Hep.EdS", "SexoM.E4.Hep.EdY", "SexoF.E4.Hep.EdS" , "SexoF.E4.Hep.EdY"), lty = c(3,1,3,1), 
+       col = c("cornflowerblue","purple", "green","red"), lwd=3)
+```
+
+
+
+De lo anterior, claramente se nota que existe mayor riesgo para los pacientes del género masculino en etapa de la enfermedad 4, siguiendo inmediatamente los pacientes del género femenino en la misma etapa de la enfermedad.
+
+
+
+### Validación del modelo de acuerdo al supuesto de riesgos proporcionales
+
+Como nuestro nuevo modelo con la transformación del tiempo (raíz cuadrada del tiempo) ya cumple con ser de riesgos proporcionales, por lo tanto analizaremos ahora los residuos y la validación del modelo.
+
+
+Para verificar los riesgos proporcionales del modelo extendido se emplean los residuos de Schoenfeld
+
+```{r Schoenfeld, echo=FALSE, message=FALSE, warning=FALSE}
+ggcoxdiagnostics(modelo_cox_ext, type = "schoenfeld")
+```
+
+Residuos martingala para evaluar la no linealidad.
+
+```{r Martingala plot, echo=FALSE}
+par(mfrow=c(1,2))
+residuales = residuals(modelo_cox_ext, type = "martingale")
+plot(residuales , xlab="Edad" , ylab="Residuos de martingala" ,main = "No linealidad de los residuos")
+cox1.0 = coxph(Surv(datos$N_Days,delta)∼1,na.action=na.exclude)
+rr = resid(cox1.0)
+plot(datos$N_Days,rr,xlab="Edad",ylab="Residuos de martingala",main="Forma funcional para edad")
+lines(lowess(datos$N_Days,rr,iter=0))
+```
+
+
+
+Residuos de devianza (transformación simétrica de los residuos martingala) para examinar observaciones influyentes en el modelo extendido de cox.
+
+```{r Devianza, warning=FALSE, include=FALSE}
+dev = residuals(modelo_cox_ext, type = "deviance")
+```
+
+De manera gráfica se ve de la siguiente forma
+
+```{r Plot devianza, echo=FALSE, warning=FALSE}
+# Graficamos
+plot(dev, col = "purple", main = "Residuos de devianza",
+     xlab = "ID", ylab = "Devianza", pch = 20, ylim = c(-3,3))
+abline(h = c(-1, 1), col = "plum")
+abline(h = c(-2.5, 2.5), col = "lightsalmon")
+```
+
+Donde observamos 4 valores atípicos, los cuales obtenemos su posicionamiento a continuación
+
+```{r posicion atipicos, echo=FALSE, warning=FALSE}
+# Casos extremos:
+dev[abs(dev) >= 1] # Posicion
+```
+
+Y en nuestra base de datos serían los siguientes pacientes
+
+```{r Atipicos completo, echo=FALSE, warning=FALSE}
+base_nueva[c(21,105,210,265),]
+```
+
+
+Finalmente los residuos dfbeta de cada covariable empleada (Sexo, Estado, Hepatomegalia y Edema) de manera individual mostrando los valores atípicos presentes. 
+
+```{r echo=FALSE}
+
+dfbeta = resid(modelo_cox_ext, type = "dfbeta")
+
+# graficamos para cada covariable
+plot(dfbeta[,1], col ="purple", pch = 20, main = "Dfbeta - Sexo",
+     ylab = "Dfbeta.sexo",xlab= "ID")
+
+plot(dfbeta[,2], col ="purple", pch = 20, main = "Dfbeta - Estado",
+     ylab = "Dfbeta.estado" , xlab= "ID")
+
+plot(dfbeta[,3], col ="purple", pch = 20, main = "Dfbeta - Hepatomegalia",
+     ylab = "Dfbeta.hepatomegalia",xlab= "ID")
+
+plot(dfbeta[,4], col ="purple", pch = 20, main = "Dfbeta - Edema",
+     ylab = "Dfbeta.edema",xlab= "ID")
+```
+
+
